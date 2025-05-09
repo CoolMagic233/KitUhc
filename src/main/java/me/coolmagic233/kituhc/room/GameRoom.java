@@ -226,8 +226,8 @@ public class GameRoom {
                             getDeathPlayers().clear();
 
                             setGameStatus(GameStatus.INIT);
-
-                            break;
+                            Thread.sleep(1000);
+                            continue;
                         }
                     }
 
