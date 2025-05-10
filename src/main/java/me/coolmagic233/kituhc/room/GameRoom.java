@@ -218,7 +218,6 @@ public class GameRoom {
                                 player.teleport(Main.getInstance().getServer().getDefaultLevel().getSpawnLocation());
                             }
 
-
                             getActivePlayers().clear();
                             getDeathPlayers().clear();
 
@@ -237,13 +236,29 @@ public class GameRoom {
                         Main.getInstance().getServer().getScheduler().scheduleDelayedTask(new PluginTask(Main.getInstance()) {
                             @Override
                             public void onRun(int i) {
-                                level.unload(true);
+                                if (Main.getInstance().getServer().isLevelLoaded(levelName)){
+                                    Main.getInstance().getServer().unloadLevel(level);
+                                }
                             }
                         },1);
                         Thread.sleep(1000);
                         Main.deleteDir(new File("./worlds/"+levelName));
                         Level newLevel = Main.getInstance().getServer().getLevelByName(levelName);
-                        if (newLevel == null){
+                        for (int i = 0; i < 5; i++) {
+                            if (newLevel == null){
+                                Main.getInstance().getServer().getScheduler().scheduleDelayedTask(new PluginTask(Main.getInstance()) {
+                                    @Override
+                                    public void onRun(int i) {
+                                        Main.getInstance().getServer().generateLevel(levelName);
+                                    }
+                                },1);
+                                Thread.sleep(1000);
+                                newLevel = Main.getInstance().getServer().getLevelByName(levelName);
+                                continue;
+                            }
+                            break;
+                        }
+                        if (newLevel == null) {
                             throw new RuntimeException();
                         }
                         setLevel(newLevel);
