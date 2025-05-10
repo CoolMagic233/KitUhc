@@ -1,6 +1,7 @@
 package me.coolmagic233.kituhc.room;
 
 import cn.nukkit.Player;
+import cn.nukkit.entity.Entity;
 import cn.nukkit.level.Level;
 
 import cn.nukkit.level.Location;
@@ -205,6 +206,7 @@ public class GameRoom {
                                 RoomManager.playerContents.remove(player);
                                 player.removeAllEffects();
                                 getScoreboard().hide(player);
+                                player.teleport(Main.getInstance().getServer().getDefaultLevel().getSpawnLocation());
                             }
 
                             for (Player player : getDeathPlayers()) {
@@ -213,14 +215,9 @@ public class GameRoom {
                                 RoomManager.playerContents.remove(player);
                                 player.removeAllEffects();
                                 getScoreboard().hide(player);
+                                player.teleport(Main.getInstance().getServer().getDefaultLevel().getSpawnLocation());
                             }
 
-                            Main.getInstance().getServer().getScheduler().scheduleDelayedTask(new PluginTask(Main.getInstance()) {
-                                @Override
-                                public void onRun(int i) {
-                                    level.unload(true);
-                                }
-                            },1);
 
                             getActivePlayers().clear();
                             getDeathPlayers().clear();
@@ -232,6 +229,18 @@ public class GameRoom {
                     }
 
                     if (gameStatus == GameStatus.INIT){
+                        for (Entity entity : level.getEntities()) {
+                            if (entity instanceof Player player){
+                                player.teleport(Main.getInstance().getServer().getDefaultLevel().getSpawnLocation());
+                            }
+                        }
+                        Main.getInstance().getServer().getScheduler().scheduleDelayedTask(new PluginTask(Main.getInstance()) {
+                            @Override
+                            public void onRun(int i) {
+                                level.unload(true);
+                            }
+                        },1);
+                        Thread.sleep(1000);
                         Main.deleteDir(new File("./worlds/"+levelName));
                         Level newLevel = Main.getInstance().getServer().getLevelByName(levelName);
                         if (newLevel == null){
