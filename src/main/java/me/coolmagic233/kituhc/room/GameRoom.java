@@ -1,11 +1,14 @@
 package me.coolmagic233.kituhc.room;
 
 import cn.nukkit.Player;
+import cn.nukkit.block.Block;
 import cn.nukkit.entity.Entity;
+import cn.nukkit.item.Item;
 import cn.nukkit.level.Level;
 
 import cn.nukkit.level.Location;
 import cn.nukkit.level.Position;
+import cn.nukkit.level.format.FullChunk;
 import cn.nukkit.potion.Effect;
 import cn.nukkit.scheduler.PluginTask;
 import lombok.Data;
@@ -15,12 +18,16 @@ import me.iwareq.scoreboard.Scoreboard;
 
 import java.io.File;
 import java.util.*;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 @Data
 public class GameRoom {
     private List<Player> activePlayers = new CopyOnWriteArrayList<>();
     private List<Player> deathPlayers = new CopyOnWriteArrayList<>();
+    private ArrayBlockingQueue<Player> deathQueue = new ArrayBlockingQueue<>(10);
+    private ArrayBlockingQueue<Level> resetQueue = new ArrayBlockingQueue<>(10);
     private Level level;
     private Scoreboard scoreboard;
     private BorderChecker borderChecker;
@@ -101,6 +108,18 @@ public class GameRoom {
                     }
 
                     if (gameStatus == GameStatus.WAIT){
+
+                        for (Player player : getAllPlayers()) {
+                            if(player.isInsideOfSolid()){
+                                for (int i = (int) player.getLocation().getY(); i < 255 ; i ++){
+                                    Block block = player.getLevel().getBlock(player.getLocation().setY(i));
+                                    if (block.isAir()){
+                                        player.teleport(block);
+                                    }
+                                }
+                            }
+                        }
+
                         if (!checkPlayersCount()){
                             getActivePlayers().forEach(player -> player.sendActionBar("等待游戏开始"));
                             Thread.sleep(1000);
@@ -131,6 +150,18 @@ public class GameRoom {
 
                     }
                     if (gameStatus == GameStatus.GAME){
+                        Player poll = deathQueue.poll();
+                        while (poll != null){
+                            for (Item item : poll.getInventory().getContents().values()) {
+                                poll.getLevel().dropItem(poll.getLocation(),item);
+                            }
+                            poll.getInventory().clearAll();
+                            poll.setGamemode(3);
+                            getActivePlayers().remove(poll);
+                            getDeathPlayers().add(poll);
+                            sendMessageAll(poll.getName() + " 阵亡了。");
+                            poll = deathQueue.poll();
+                        }
                         setKitChoose(false);
                         if (time == 60*10){
                             protect = false;
@@ -200,23 +231,24 @@ public class GameRoom {
                         sendMessageAll(String.format("正在结算，游戏结束还有%s秒",time));
                         time --;
                         if (time < 0) {
-                            for (Player player : getActivePlayers()) {
-                                player.setGamemode(Main.getInstance().getServer().getDefaultGamemode());
-                                player.getInventory().setContents(RoomManager.playerContents.get(player));
-                                RoomManager.playerContents.remove(player);
-                                player.removeAllEffects();
-                                getScoreboard().hide(player);
-                                player.teleport(Main.getInstance().getServer().getDefaultLevel().getSpawnLocation());
+
+                            for (Player player : getAllPlayers()) {
+                                if (player.getLevel().getName().equals(levelName)){
+                                    player.setGamemode(Main.getInstance().getServer().getDefaultGamemode());
+                                    player.getInventory().setContents(RoomManager.playerContents.get(player));
+                                    RoomManager.playerContents.remove(player);
+                                    player.removeAllEffects();
+                                    getScoreboard().hide(player);
+                                    player.teleport(Main.getInstance().getServer().getDefaultLevel().getSpawnLocation());
+                                }
                             }
 
-                            for (Player player : getDeathPlayers()) {
-                                player.setGamemode(Main.getInstance().getServer().getDefaultGamemode());
-                                player.getInventory().setContents(RoomManager.playerContents.get(player));
-                                RoomManager.playerContents.remove(player);
-                                player.removeAllEffects();
-                                getScoreboard().hide(player);
-                                player.teleport(Main.getInstance().getServer().getDefaultLevel().getSpawnLocation());
-                            }
+//                            getResetQueue().offer(level);
+                            Main.getInstance().getServer().getScheduler().scheduleTask(Main.getInstance(),()->{
+                                level.unload();
+                            });
+                            Thread.sleep(1000);
+                            setLevel(null);
 
                             getActivePlayers().clear();
                             getDeathPlayers().clear();
@@ -228,40 +260,31 @@ public class GameRoom {
                     }
 
                     if (gameStatus == GameStatus.INIT){
-                        for (Entity entity : level.getEntities()) {
-                            if (entity instanceof Player player){
-                                player.teleport(Main.getInstance().getServer().getDefaultLevel().getSpawnLocation());
-                            }
-                        }
-                        Main.getInstance().getServer().getScheduler().scheduleDelayedTask(new PluginTask(Main.getInstance()) {
-                            @Override
-                            public void onRun(int i) {
-                                if (Main.getInstance().getServer().isLevelLoaded(levelName)){
-                                    Main.getInstance().getServer().unloadLevel(level);
-                                }
-                            }
-                        },1);
-                        Thread.sleep(1000);
                         Main.deleteDir(new File("./worlds/"+levelName));
+                        Main.getInstance().getServer().getScheduler().scheduleTask(Main.getInstance(),()->{
+                            Main.getInstance().getServer().generateLevel(levelName);
+                        });
+                        Thread.sleep(2000);
                         Level newLevel = Main.getInstance().getServer().getLevelByName(levelName);
-                        for (int i = 0; i < 5; i++) {
-                            if (newLevel == null){
-                                Main.getInstance().getServer().getScheduler().scheduleDelayedTask(new PluginTask(Main.getInstance()) {
-                                    @Override
-                                    public void onRun(int i) {
-                                        Main.getInstance().getServer().generateLevel(levelName);
-                                    }
-                                },1);
-                                Thread.sleep(1000);
-                                newLevel = Main.getInstance().getServer().getLevelByName(levelName);
-                                continue;
-                            }
-                            break;
-                        }
+//                        for (int i = 0; i < 5; i++) {
+//                            if (newLevel == null){
+//                                Main.getInstance().getServer().getScheduler().scheduleDelayedTask(new PluginTask(Main.getInstance()) {
+//                                    @Override
+//                                    public void onRun(int i) {
+//                                        Main.getInstance().getServer().generateLevel(levelName);
+//                                    }
+//                                },1);
+//                                Thread.sleep(1000);
+//                                newLevel = Main.getInstance().getServer().getLevelByName(levelName);
+//                                continue;
+//                            }
+//                            break;
+//                        }
                         if (newLevel == null) {
                             throw new RuntimeException();
                         }
                         setLevel(newLevel);
+                        setKitChoose(true);
                         setTime(RoomManager.WAIT_TIME);
                         setBorderChecker(new BorderChecker(-5000,5000,-5000,5000));
                         setGameStatus(GameStatus.WAIT);

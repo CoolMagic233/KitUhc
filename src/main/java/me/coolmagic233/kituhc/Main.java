@@ -11,6 +11,7 @@ import lombok.Getter;
 import me.coolmagic233.kituhc.commands.AdminCommand;
 import me.coolmagic233.kituhc.commands.DefaultCommand;
 import me.coolmagic233.kituhc.room.FastMode;
+import me.coolmagic233.kituhc.room.GameRoom;
 import me.coolmagic233.kituhc.room.RoomManager;
 import me.iwareq.scoreboard.Scoreboard;
 import me.iwareq.scoreboard.packet.data.DisplaySlot;
@@ -42,41 +43,30 @@ public class Main extends PluginBase {
             }
         }
 
+//        getServer().getScheduler().scheduleRepeatingTask(this,() -> {
+//
+//            for (GameRoom room : RoomManager.rooms) {
+//                Level level = room.getResetQueue().poll();
+//                if (level == null) continue;
+//                level.setAutoSave(false);
+//                level.getProvider().close();
+//                level.unload();
+//            }
+//
+//        },10);
+
         getServer().getCommandMap().register("", new Command("uhc") {
             @Override
             public boolean execute(CommandSender sender, String commandLabel, String[] args) {
-                if (args.length > 0){
-                    switch (args[0]){
-                        case "level" ->{
-                            //uhc level namn
-                            if (args.length == 2){
-                                Level level = getServer().getLevelByName(args[1]);
-                                if (level == null){
-                                    sender.sendMessage("世界不存在");
-                                    return false;
-                                }
-                                FastMode.level = level;
-                                sender.sendMessage("游戏世界设置成功");
-                                return true;
-                            }
-                        }
+                executor.execute(() -> {
+                    if (sender instanceof Player player){
+                        getServer().generateLevel("uhclevel");
+                        Level level = getServer().getLevelByName("uhclevel");
+                        player.teleport(level.getSpawnLocation());
+                        level.setAutoSave(false);
+                        level.unload(true);
                     }
-                    return true;
-                }
-                Config config = new Config(getDataFolder() + File.separator + "config.yml",Config.YAML);
-                List<String> list = config.getStringList("a");
-
-
-                if (sender instanceof Player player){
-                    scoreboard.refresh();
-                    scoreboard.setHandler(pl -> {
-                        for (String s : list) {
-                            scoreboard.addLine(s);
-                        }
-                    });
-                    scoreboard.show(player);
-                }
-
+                });
                 return false;
             }
         });

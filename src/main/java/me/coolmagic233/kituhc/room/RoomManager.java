@@ -9,6 +9,7 @@ import cn.nukkit.event.entity.EntityDamageByEntityEvent;
 import cn.nukkit.event.entity.EntityDamageEvent;
 import cn.nukkit.event.entity.ProjectileHitEvent;
 import cn.nukkit.event.player.PlayerChatEvent;
+import cn.nukkit.event.player.PlayerCommandPreprocessEvent;
 import cn.nukkit.event.player.PlayerInteractEvent;
 import cn.nukkit.event.player.PlayerQuitEvent;
 import cn.nukkit.event.server.ServerCommandEvent;
@@ -38,6 +39,9 @@ public class RoomManager implements Listener {
 
     public static void join(Player player){
         for (GameRoom room : rooms) {
+            if (room.getAllPlayers().contains(player)){
+                return;
+            }
             if (room.getGameStatus() == GameStatus.WAIT){
                 room.getActivePlayers().add(player);
                 room.getActivePlayers().forEach(p -> p.sendMessage(p.getName() + " 加入了游戏"));
@@ -79,15 +83,18 @@ public class RoomManager implements Listener {
 
     public static void delayJoin(Player player){
         Main.getInstance().getExecutor().execute(()->{
+            try {
             player.sendMessage("正在创建房间，请耐心等待");
             GameRoom gameRoom = create(rooms.size() + 1);
-            gameRoom.setGameStatus(GameStatus.WAIT);
+            if (gameRoom.getLevel() != null){
+                gameRoom.setGameStatus(GameStatus.WAIT);
+            }
             gameRoom.setTime(WAIT_TIME);
             gameRoom.setScoreboard(new Scoreboard("KitUHC", DisplaySlot.SIDEBAR, 0));
             gameRoom.startGameLoop();
-            try {
                 Thread.sleep(2000);
             } catch (InterruptedException e) {
+                player.sendMessage("创建房间异常，请联系服务器管理员");
                 throw new RuntimeException(e);
             }
             join(player);
@@ -107,7 +114,9 @@ public class RoomManager implements Listener {
         }
         Main.getInstance().getServer().generateLevel(levelName,new Random().nextInt(100000000), Generator.getGenerator("default"));
         gameRoom.setLevel(Main.getInstance().getServer().getLevelByName(levelName));
-        gameRoom.getLevel().gameRules.setGameRule(GameRule.SHOW_COORDINATES,true);
+        if (gameRoom.getLevel() != null){
+            gameRoom.getLevel().gameRules.setGameRule(GameRule.SHOW_COORDINATES,true);
+        }
         gameRoom.setLevelName(levelName);
         gameRoom.setBorderChecker(new BorderChecker(-5000,5000,-5000,5000));
         rooms.add(gameRoom);
@@ -129,14 +138,22 @@ public class RoomManager implements Listener {
                 return;
             }
             if (e.getFinalDamage() >= e.getEntity().getHealth()){
-                    for (Item item : player.getInventory().getContents().values()) {
-                        e.getEntity().getLevel().dropItem(e.getEntity().getLocation(),item);
-                    }
-                    player.getInventory().clearAll();
-                    player.setGamemode(3);
-                    room.getActivePlayers().remove(player);
-                    room.getDeathPlayers().add(player);
-                    room.sendMessageAll(player.getName() + " 阵亡了。");
+                   room.getDeathQueue().offer(player);
+                   e.setCancelled();
+                }
+            }
+        }
+    }
+
+    @EventHandler
+    public void onCommand(PlayerCommandPreprocessEvent e){
+        Player player = e.getPlayer();
+        if (e.getMessage().equals("kill")){
+            for (GameRoom room : rooms) {
+                if (!inRoom(player, room)) return;
+                if (room.getGameStatus() == GameStatus.GAME) {
+                    room.getDeathQueue().offer(player);
+                    e.setCancelled();
                 }
             }
         }
