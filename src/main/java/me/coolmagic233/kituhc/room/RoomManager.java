@@ -7,25 +7,21 @@ import cn.nukkit.event.Listener;
 import cn.nukkit.event.block.BlockBreakEvent;
 import cn.nukkit.event.entity.EntityDamageByEntityEvent;
 import cn.nukkit.event.entity.EntityDamageEvent;
-import cn.nukkit.event.entity.ProjectileHitEvent;
-import cn.nukkit.event.player.PlayerChatEvent;
-import cn.nukkit.event.player.PlayerCommandPreprocessEvent;
-import cn.nukkit.event.player.PlayerInteractEvent;
-import cn.nukkit.event.player.PlayerQuitEvent;
-import cn.nukkit.event.server.ServerCommandEvent;
-import cn.nukkit.item.Item;
-import cn.nukkit.item.ItemCompass;
-import cn.nukkit.item.ItemPotion;
-import cn.nukkit.item.ItemPotionSplash;
+import cn.nukkit.event.player.*;
+import cn.nukkit.form.element.ElementButton;
+import cn.nukkit.form.response.FormResponseSimple;
+import cn.nukkit.form.window.FormWindowSimple;
+import cn.nukkit.item.*;
 import cn.nukkit.level.GameRule;
 import cn.nukkit.level.generator.Generator;
-import cn.nukkit.potion.Potion;
+import cn.nukkit.nbt.tag.CompoundTag;
+import cn.nukkit.utils.TextFormat;
+import cn.nukkit.utils.Utils;
 import me.coolmagic233.kituhc.Kits;
 import me.coolmagic233.kituhc.Main;
 import me.iwareq.scoreboard.Scoreboard;
 import me.iwareq.scoreboard.packet.data.DisplaySlot;
 
-import java.io.File;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -45,13 +41,18 @@ public class RoomManager implements Listener {
             if (room.getGameStatus() == GameStatus.WAIT){
                 room.getActivePlayers().add(player);
                 room.getActivePlayers().forEach(p -> p.sendMessage(p.getName() + " 加入了游戏"));
-                player.sendMessage("请选择你的游戏职业(在聊天栏输入对应的序号): \n [1]矿工 [2]法师 [3]坦克 [4]射手 [5]战士");
                 player.teleport(room.getLevel().getSafeSpawn());
                 player.setGamemode(2);
                 player.removeAllEffects();
-                room.getKits().put(player,Kits.MINER);
                 playerContents.put(player,player.getInventory().getContents());
                 player.getInventory().clearAll();
+                player.getInventory().setItem(8,Item.get(ItemID.FEATHER).setCustomName("§a退出房间"));
+                room.getLevel().setRaining(false);
+                FormWindowSimple formWindowSimple = new FormWindowSimple("选择你的职业", "");
+                for (Kits kit : Kits.values()) {
+                    formWindowSimple.addButton(new ElementButton(room.getKitName(kit)));
+                }
+                player.showFormWindow(formWindowSimple,Main.FORM_ID_KIT_SELECT);
                 return;
             }
 
@@ -62,8 +63,8 @@ public class RoomManager implements Listener {
     public static void quit(Player player){
         for (GameRoom room : rooms) {
             if (room.getActivePlayers().contains(player) || room.getDeathPlayers().contains(player)){
-                room.getActivePlayers().forEach(p -> p.sendMessage(p.getName() + " 退出了游戏"));
-                room.getDeathPlayers().forEach(p -> p.sendMessage(p.getName() + " 退出了游戏"));
+                room.getActivePlayers().forEach(p -> p.sendMessage(player.getName() + " 退出了游戏"));
+                room.getDeathPlayers().forEach(p -> p.sendMessage(player.getName() + " 退出了游戏"));
                 player.teleport(Main.getInstance().getServer().getDefaultLevel().getSpawnLocation());
                 player.setGamemode(Main.getInstance().getServer().getDefaultGamemode());
                 player.getInventory().setContents(playerContents.get(player));
@@ -72,6 +73,7 @@ public class RoomManager implements Listener {
                 room.getScoreboard().hide(player);
                 room.getActivePlayers().remove(player);
                 room.getDeathPlayers().remove(player);
+
                 return;
             }
         }
@@ -112,7 +114,7 @@ public class RoomManager implements Listener {
                 levelName = "kituhc-room-"+roomsNumber;
             }
         }
-        Main.getInstance().getServer().generateLevel(levelName,new Random().nextInt(100000000), Generator.getGenerator("default"));
+        Main.getInstance().getServer().generateLevel(levelName,new Random().nextInt(100000000), Generator.getGenerator(Generator.TYPE_INFINITE));
         gameRoom.setLevel(Main.getInstance().getServer().getLevelByName(levelName));
         if (gameRoom.getLevel() != null){
             gameRoom.getLevel().gameRules.setGameRule(GameRule.SHOW_COORDINATES,true);
@@ -123,9 +125,26 @@ public class RoomManager implements Listener {
         return gameRoom;
     }
 
+
     @EventHandler
     public void onQuit(PlayerQuitEvent e){
         quit(e.getPlayer());
+    }
+
+    @EventHandler
+    public void onFormResponse(PlayerFormRespondedEvent e){
+        Player player = e.getPlayer();
+        for (GameRoom room : rooms) {
+            if (!inRoom(player,room)) return;
+            if (room.getGameStatus() == GameStatus.WAIT){
+                if (e.getFormID() == Main.FORM_ID_KIT_SELECT){
+                    if (e.getResponse() instanceof FormResponseSimple response){
+                        room.getKits().put(player,Kits.values()[response.getClickedButtonId()]);
+                        player.sendMessage("你选择了职业: " + room.getKitName(room.getKits().get(player)));
+                    }
+                }
+            }
+        }
     }
 
     @EventHandler
@@ -138,8 +157,11 @@ public class RoomManager implements Listener {
                 return;
             }
             if (e.getFinalDamage() >= e.getEntity().getHealth()){
-                   room.getDeathQueue().offer(player);
+                   if (!room.getDeathQueue().contains(player)){
+                       room.getDeathQueue().offer(player);
+                   }
                    e.setCancelled();
+                   return;
                 }
             }
         }
@@ -166,9 +188,11 @@ public class RoomManager implements Listener {
                 if (!inRoom(damager, room)) return;
                 if (room.getGameStatus() == GameStatus.GAME) {
                     if (room.isProtect()) {
-                        damager.sendMessage("你无法在无敌保护时间内攻击其他玩家");
-                        e.setCancelled();
-                        return;
+                        if (e.getEntity() instanceof Player){
+                            damager.sendMessage("你无法在无敌保护时间内攻击其他玩家");
+                            e.setCancelled();
+                            return;
+                        }
                     }
                     Kits damager_kit = room.getKits().get(damager);
                     if (damager_kit != null){
@@ -201,6 +225,12 @@ public class RoomManager implements Listener {
         if (e.getAction() == PlayerInteractEvent.Action.RIGHT_CLICK_BLOCK || e.getAction() == PlayerInteractEvent.Action.RIGHT_CLICK_AIR){
             for (GameRoom room : rooms) {
                 if (!inRoom(e.getPlayer(),room)) return;
+                if (room.getGameStatus() == GameStatus.WAIT){
+                    if (e.getPlayer().getInventory().getItemInHand().getCustomName().equals("§a退出房间")){
+                        quit(e.getPlayer());
+                        return;
+                    }
+                }
                 if (room.getGameStatus() == GameStatus.GAME) {
                     if (e.getItem().getId() == new ItemCompass().getId()){
                         if (new Random().nextInt(100) < 75){
@@ -210,6 +240,43 @@ public class RoomManager implements Listener {
                         }
                         String join = String.join("\n", room.getActivePlayers().stream().map(p -> p.getName() + "->" + (int) p.getLocation().getX() + " " + (int) p.getLocation().getY() + " " + (int) p.getLocation().getZ()).toList().toArray(new String[]{}));
                         e.getPlayer().sendMessage("存活玩家的游戏坐标：\n "+join);
+                    }
+
+                    if (e.getBlock().getId() == new BlockBeacon().getId()){
+                        Item itemInHand = e.getPlayer().getInventory().getItemInHand();
+                        if (itemInHand.hasCompoundTag()){
+                            if (itemInHand.getNamedTag().contains("level")){
+                                int level = itemInHand.getNamedTag().getInt("level");
+                                if (level == 1){
+                                    Item common = room.getRandomReward("common");
+                                    if (common == null){
+                                        return;
+                                    }
+                                    e.getPlayer().getLevel().dropItem(e.getBlock().getLocation().add(0,1,0),common);
+                                    e.getPlayer().getInventory().setItemInHand(e.getPlayer().getInventory().getItemInHand().increment(1));
+                                }
+
+                                if (level == 2){
+                                    Item rare = room.getRandomReward("rare");
+                                    if (rare == null){
+                                        return;
+                                    }
+                                    e.getPlayer().getLevel().dropItem(e.getBlock().getLocation().add(0,1,0),rare);
+                                    e.getPlayer().getInventory().setItemInHand(e.getPlayer().getInventory().getItemInHand().increment(1));
+                                }
+
+                                if (level == 3){
+                                    Item epic = room.getRandomReward("epic");
+                                    if (epic == null){
+                                        return;
+                                    }
+                                    e.getPlayer().getLevel().dropItem(e.getBlock().getLocation().add(0,1,0),epic);
+                                    e.getPlayer().getInventory().setItemInHand(e.getPlayer().getInventory().getItemInHand().increment(1));
+                                }
+
+
+                            }
+                        }
                     }
                 }
             }
@@ -238,6 +305,34 @@ public class RoomManager implements Listener {
                             e.getPlayer().getLevel().dropItem(e.getBlock().getLocation(),new ItemPotionSplash(new Random().nextInt(36)));
                         }
                     }
+
+                    if (e.getBlock().getId() == new BlockOreIron().getId() || e.getBlock().getId() == new BlockOreCoal().getId() || e.getBlock().getId() == new BlockOreCopper().getId()){
+                        Item item = Item.fromString(new ItemTrialKey().getNamespaceId());
+                        CompoundTag tag = item.getOrCreateNamedTag();
+                        tag.putInt("level",1);
+                        item.setNamedTag(tag);
+                        item.setCustomName("§a一级资源钥匙");
+                        e.getBlock().getLevel().dropItem(e.getBlock().getLocation(),item);
+                    }
+
+                    if (e.getBlock().getId() == new BlockOreLapis().getId() || e.getBlock().getId() == new BlockOreRedstoneGlowing().getId()){
+                        Item item = Item.fromString(new ItemTrialKey().getNamespaceId());
+                        CompoundTag tag = item.getOrCreateNamedTag();
+                        tag.putInt("level",2);
+                        item.setNamedTag(tag);
+                        item.setCustomName("§b二级资源钥匙");
+                        e.getBlock().getLevel().dropItem(e.getBlock().getLocation(),item);
+                    }
+
+                    if (e.getBlock().getId() == new BlockOreDiamond().getId() || e.getBlock().getId() == new BlockOreGold().getId()){
+                        Item item = Item.fromString(new ItemTrialKey().getNamespaceId());
+                        CompoundTag tag = item.getOrCreateNamedTag();
+                        tag.putInt("level",3);
+                        item.setNamedTag(tag);
+                        item.setCustomName("§c三级资源钥匙");
+                        e.getBlock().getLevel().dropItem(e.getBlock().getLocation(),item);
+                    }
+
                 }
             }
         }
@@ -248,29 +343,8 @@ public class RoomManager implements Listener {
     public void onChat(PlayerChatEvent e){
         for (GameRoom room : rooms) {
             if (!inRoom(e.getPlayer(),room)) return;
-            if (room.getGameStatus() == GameStatus.WAIT){
-                if (room.isKitChoose()){
-                    int i = 0;
-                    try {
-                        i = Integer.parseInt(e.getMessage());
-                    }catch (Exception ignore){
-                        return;
-                    }
-                    switch (i) {
-                        case 2 -> room.getKits().put(e.getPlayer(), Kits.MONK);
-                        case 3-> room.getKits().put(e.getPlayer(), Kits.TANK);
-                        case 4-> room.getKits().put(e.getPlayer(), Kits.SHOOTER);
-                        case 5-> room.getKits().put(e.getPlayer(), Kits.SOLDIER);
-                        default -> room.getKits().put(e.getPlayer(), Kits.MINER);
-                    }
-
-                    e.getPlayer().sendMessage("你选择了职业: "+room.getKitName(room.getKits().get(e.getPlayer())));
-                    e.setCancelled();
-                }
-            }
             room.sendMessageAll(e.getPlayer().getName() + "-> " + e.getMessage());
             e.setCancelled();
         }
     }
-
 }

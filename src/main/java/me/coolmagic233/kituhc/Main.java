@@ -1,31 +1,27 @@
 package me.coolmagic233.kituhc;
 
-
-import cn.nukkit.Player;
-import cn.nukkit.command.Command;
-import cn.nukkit.command.CommandSender;
 import cn.nukkit.level.Level;
 import cn.nukkit.plugin.PluginBase;
 import cn.nukkit.utils.Config;
 import lombok.Getter;
 import me.coolmagic233.kituhc.commands.AdminCommand;
 import me.coolmagic233.kituhc.commands.DefaultCommand;
-import me.coolmagic233.kituhc.room.FastMode;
-import me.coolmagic233.kituhc.room.GameRoom;
 import me.coolmagic233.kituhc.room.RoomManager;
 import me.iwareq.scoreboard.Scoreboard;
 import me.iwareq.scoreboard.packet.data.DisplaySlot;
 
 import java.io.File;
-import java.io.IOException;
-import java.util.List;
+import java.util.Random;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
 public class Main extends PluginBase {
     @Getter
     public static Main instance;
+    public static final int FORM_ID_KIT_SELECT = 2025080201;
+    public static Random RANDOM = new Random();
     public Scoreboard scoreboard = null;
+    public Config rewardConfig;
     @Getter
     public final Executor executor = Executors.newCachedThreadPool();
     @Override
@@ -42,34 +38,8 @@ public class Main extends PluginBase {
                 deleteDir(file);
             }
         }
-
-//        getServer().getScheduler().scheduleRepeatingTask(this,() -> {
-//
-//            for (GameRoom room : RoomManager.rooms) {
-//                Level level = room.getResetQueue().poll();
-//                if (level == null) continue;
-//                level.setAutoSave(false);
-//                level.getProvider().close();
-//                level.unload();
-//            }
-//
-//        },10);
-
-        getServer().getCommandMap().register("", new Command("uhc") {
-            @Override
-            public boolean execute(CommandSender sender, String commandLabel, String[] args) {
-                executor.execute(() -> {
-                    if (sender instanceof Player player){
-                        getServer().generateLevel("uhclevel");
-                        Level level = getServer().getLevelByName("uhclevel");
-                        player.teleport(level.getSpawnLocation());
-                        level.setAutoSave(false);
-                        level.unload(true);
-                    }
-                });
-                return false;
-            }
-        });
+        saveResource("rewards.yml");
+        rewardConfig = new Config(getDataFolder() + File.separator + "rewards.yml",Config.YAML);
         getLogger().info("Kituhc started.");
     }
 

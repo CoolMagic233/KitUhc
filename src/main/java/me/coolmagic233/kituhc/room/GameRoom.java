@@ -2,15 +2,15 @@ package me.coolmagic233.kituhc.room;
 
 import cn.nukkit.Player;
 import cn.nukkit.block.Block;
-import cn.nukkit.entity.Entity;
+import cn.nukkit.block.BlockBeacon;
+import cn.nukkit.block.BlockWood;
 import cn.nukkit.item.Item;
+import cn.nukkit.level.DimensionEnum;
 import cn.nukkit.level.Level;
 
 import cn.nukkit.level.Location;
-import cn.nukkit.level.Position;
-import cn.nukkit.level.format.FullChunk;
+import cn.nukkit.math.Vector2;
 import cn.nukkit.potion.Effect;
-import cn.nukkit.scheduler.PluginTask;
 import lombok.Data;
 import me.coolmagic233.kituhc.Kits;
 import me.coolmagic233.kituhc.Main;
@@ -19,7 +19,6 @@ import me.iwareq.scoreboard.Scoreboard;
 import java.io.File;
 import java.util.*;
 import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 @Data
@@ -38,6 +37,7 @@ public class GameRoom {
     private boolean protect = true;
     private boolean gameLoop = true;
     private int time;
+    private int rewardsRefresh;
     private String levelName;
 
     public void sendMessageAll(String text){
@@ -46,7 +46,7 @@ public class GameRoom {
     }
 
     public void sendMessage(String text){
-        getActivePlayers().forEach(player -> player.sendMessage(text));
+        getAllPlayers().forEach(player -> player.sendMessage(text));
     }
 
     public void sendActionBar(String text){
@@ -92,15 +92,11 @@ public class GameRoom {
             while (gameLoop){
                 try {
 
-                    List<String> list = new ArrayList<>(getActivePlayers().stream().map(player -> player.getName() + " 存活").toList());
-                    list.addAll(getDeathPlayers().stream().map(player -> player.getName() + " 阵亡").toList());
 
                     scoreboard.refresh();
                     scoreboard.setHandler(pl -> {
                         scoreboard.addLine("边界: " + (int) borderChecker.get());
-                        for (String s : list) {
-                            scoreboard.addLine(s);
-                        }
+                        scoreboard.addLine("存活玩家: "+getActivePlayers().size());
                     });
 
                     for (Player player : getAllPlayers()) {
@@ -122,31 +118,36 @@ public class GameRoom {
 
                         if (!checkPlayersCount()){
                             getActivePlayers().forEach(player -> player.sendActionBar("等待游戏开始"));
+                            time = 10;
                             Thread.sleep(1000);
                             continue;
                         }
                         if (time < 1){
                             setGameStatus(GameStatus.GAME);
-                            sendMessage("游戏开始!");
                             for (Player player : getActivePlayers()) {
                                 player.setGamemode(0);
                                 player.getInventory().clearAll();
                                 player.addEffect(Effect.getEffect(27).setDuration(20 * 30));
                                 player.setHealth(player.getMaxHealth());
                                 player.getFoodData().setFoodLevel(player.getFoodData().getMaxLevel());
-                                //TODO Kit Dev...
+                                if (getKits().get(player) == null){
+                                    getKits().put(player,Kits.values()[Main.RANDOM.nextInt(Kits.values().length - 1)]);
+                                    player.sendMessage("本局你未选择职业，将随机分配职业为：" + getKitName(getKits().get(player)));
+                                }else {
+                                    player.sendMessage("本局你的职业为：" + getKitName(getKits().get(player)));
+                                }
+
+                                player.sendMessage("游戏开始!");
                             }
                             distributePlayers(getActivePlayers(),level);
-
+                            for (Player player : getActivePlayers()) {
+                                player.getInventory().addItem(Item.get(new BlockWood().getId(),0,20));
+                            }
                             Thread.sleep(1000);
                             continue;
                         }
                         sendActionBar(String.format("游戏还有%s秒开始", time));
                         time --;
-                        if (!checkPlayersCount()){
-                            setGameStatus(GameStatus.WAIT);
-                            time = 10;
-                        }
 
                     }
                     if (gameStatus == GameStatus.GAME){
@@ -163,13 +164,40 @@ public class GameRoom {
                             poll = deathQueue.poll();
                         }
                         setKitChoose(false);
-                        if (time == 60*10){
+
+                        if (time == 60*5){
                             protect = false;
                             sendMessageAll("无敌保护结束，请各位玩家小心。");
                         }
 
+                        if (time >= 60 * 5){
+                            rewardsRefresh ++;
+                            if (rewardsRefresh >= 60 * 2){
+                                Vector2 vector2 = borderChecker.getRandomVectorOfInSideBorder(20);
+                                int y = getLevel().getMaxBlockY();
+                                while (y > 0){
+                                    y --;
+                                    Block block = getLevel().getBlock((int) vector2.x, y, (int) vector2.y);
+                                    if (!block.isAir()){
+                                        Location add = block.getLocation().add(0, 1, 0);
+                                        getLevel().setBlock(add,new BlockBeacon());
+                                        for (Player player : getAllPlayers()) {
+                                            player.sendMessage("§e资源兑换点在坐标§a"+(int) add.getX()+" "+(int) add.getY()+" "+(int) add.getZ()+" §e刷新");
+                                        }
+                                        rewardsRefresh = 0;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+
                         if (time <= 60 * 25){
                             borderChecker.shrink(2);
+                        }
+
+                        for (Player player : getAllPlayers()) {
+                            borderChecker.showBorder(player);
                         }
 
                         for (Player player : getActivePlayers()) {
@@ -177,7 +205,7 @@ public class GameRoom {
                                 if (player.getName().equals(activePlayer.getName())) continue;
                                 Location location = lastLocation.get(activePlayer);
                                 if (location == null) break;
-                                if (player.getLocation().distance(activePlayer.getLocation()) < 100){
+                                if (player.getLocation().distance(activePlayer.getLocation()) < 50){
                                     if (player.getLocation().distance(activePlayer.getLocation()) < player.getLocation().distance(location)){
                                         player.sendActionBar(activePlayer.getName() + " 正在向你靠近！");
                                         break;
@@ -199,7 +227,7 @@ public class GameRoom {
                                         }
                                     }
                                     if (!hasDigSpeed) {
-                                        player.addEffect(Effect.getEffectByName("HASTE").setDuration(20*20).setAmplifier(2));
+                                        player.addEffect(Effect.getEffectByName("HASTE").setDuration(20*20).setAmplifier(1));
                                     }
                                 }
                                 player.setNameTag(player.getName() + "\n 职业: " + getKitName(kit));
@@ -209,8 +237,10 @@ public class GameRoom {
                             }
                         }
 
-                        if (getAllPlayers().size() == 1 || getActivePlayers().size() == 1){
-                            sendMessage(getActivePlayers().getFirst().getName() + "最终存活下来。");
+                        if (getAllPlayers().size() <= 1 || getActivePlayers().size() == 1){
+                            if (getAllPlayers().size() == 1){
+                                sendMessage(getActivePlayers().getFirst().getName() + "最终存活下来。");
+                            }
                             setGameStatus(GameStatus.SETTLEMENT);
                             time = 5;
                             Thread.sleep(1000);
@@ -236,6 +266,7 @@ public class GameRoom {
                                 if (player.getLevel().getName().equals(levelName)){
                                     player.setGamemode(Main.getInstance().getServer().getDefaultGamemode());
                                     player.getInventory().setContents(RoomManager.playerContents.get(player));
+                                    player.setNameTag(player.getName());
                                     RoomManager.playerContents.remove(player);
                                     player.removeAllEffects();
                                     getScoreboard().hide(player);
@@ -244,27 +275,28 @@ public class GameRoom {
                             }
 
 //                            getResetQueue().offer(level);
-                            Main.getInstance().getServer().getScheduler().scheduleTask(Main.getInstance(),()->{
-                                level.unload();
-                            });
-                            Thread.sleep(1000);
-                            setLevel(null);
 
                             getActivePlayers().clear();
                             getDeathPlayers().clear();
 
                             setGameStatus(GameStatus.INIT);
-                            Thread.sleep(1000);
                             continue;
                         }
                     }
 
                     if (gameStatus == GameStatus.INIT){
+                        Main.getInstance().getServer().getScheduler().scheduleDelayedTask(Main.getInstance(),()->{
+                            if (Main.getInstance().getServer().isLevelLoaded(levelName)){
+                                Main.getInstance().getServer().unloadLevel(this.level);
+                                setLevel(null);
+                            }
+                        },20 * 4);
+                        Thread.sleep(6000);
                         Main.deleteDir(new File("./worlds/"+levelName));
-                        Main.getInstance().getServer().getScheduler().scheduleTask(Main.getInstance(),()->{
+                        Main.getInstance().getServer().getScheduler().scheduleDelayedTask(Main.getInstance(),()->{
                             Main.getInstance().getServer().generateLevel(levelName);
-                        });
-                        Thread.sleep(2000);
+                        },20);
+                        Thread.sleep(6000);
                         Level newLevel = Main.getInstance().getServer().getLevelByName(levelName);
 //                        for (int i = 0; i < 5; i++) {
 //                            if (newLevel == null){
@@ -320,10 +352,36 @@ public class GameRoom {
             // 创建位置对象 (Y坐标固定为150)
             Location location = new Location(x, 150, z, level);
 
+            int y = location.getLevel().getMaxBlockY();
+
+            while (y > 0){
+                y --;
+                if (location.getLevel().getBlock((int) location.x,y, (int) location.z).isWater() || location.getLevel().getBlock((int) location.x,y, (int) location.z).isWaterSource()){
+                    distributePlayers(players,level);
+                    return;
+                }
+            }
             // 传送玩家
             player.teleport(location);
 
         }
+    }
+
+    public Item getRandomReward(String key){
+        List<String> list = Main.getInstance().rewardConfig.getStringList(key);
+        if (list.isEmpty()) return null;
+        String s = list.get(Main.RANDOM.nextInt(list.size() - 1));
+        String[] split = s.split(",");
+        String nameSpaceId = split[0];
+        int count;
+        try{
+            count = Integer.parseInt(split[1]);
+        }catch (Exception e){
+            count = 1;
+        }
+        Item item = Item.fromString(nameSpaceId);
+        item.setCount(count);
+        return item;
     }
 
 
