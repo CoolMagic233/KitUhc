@@ -3,6 +3,7 @@ package me.coolmagic233.kituhc.commands;
 import cn.nukkit.Player;
 import cn.nukkit.command.Command;
 import cn.nukkit.command.CommandSender;
+import cn.nukkit.command.data.CommandParameter;
 import me.coolmagic233.kituhc.room.RoomManager;
 
 import java.util.Arrays;
@@ -10,6 +11,8 @@ import java.util.Arrays;
 public class DefaultCommand extends Command {
     public DefaultCommand() {
         super("kituhc");
+        this.commandParameters.clear();
+        this.commandParameters.put("option",new CommandParameter[]{CommandParameter.newEnum("Option",new String[]{"join","quit"})});
     }
 
     @Override
