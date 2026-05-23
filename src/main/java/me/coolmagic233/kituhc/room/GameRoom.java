@@ -5,6 +5,7 @@ import cn.nukkit.block.Block;
 import cn.nukkit.block.BlockBeacon;
 import cn.nukkit.block.BlockWood;
 import cn.nukkit.item.Item;
+import cn.nukkit.item.ItemID;
 import cn.nukkit.level.DimensionEnum;
 import cn.nukkit.level.Level;
 
@@ -32,12 +33,14 @@ public class GameRoom {
     private BorderChecker borderChecker;
     private Map<Player,Location> lastLocation = new HashMap<>();
     private Map<Player,Kits> kits = new HashMap<>();
+    private Map<Player,Player> lastDamager = new HashMap<>();
     private GameStatus gameStatus = GameStatus.INIT;
     private boolean kitChoose = true;
     private boolean protect = true;
     private boolean gameLoop = true;
     private int time;
     private int rewardsRefresh;
+    private int monkTimer;
     private String levelName;
 
     public void sendMessageAll(String text){
@@ -87,6 +90,27 @@ public class GameRoom {
         return "";
     }
 
+    public String getKitDesc(Kits kits){
+        switch (kits){
+            case MINER -> {
+                return "挖掘矿物掉落随机奖励品";
+            }
+            case TANK -> {
+                return "死亡时50%概率原地复活";
+            }
+            case MONK -> {
+                return "血量低于50%时每5s获得一个金苹果";
+            }
+            case SHOOTER -> {
+                return "弓箭射中玩家获得一支箭矢\n开局获得弓+5箭矢";
+            }
+            case SOLDIER -> {
+                return "击杀玩家掉落双倍物资";
+            }
+        }
+        return "";
+    }
+
     public void startGameLoop(){
         Main.getInstance().getExecutor().execute(()->{
             while (gameLoop){
@@ -130,14 +154,21 @@ public class GameRoom {
                                 player.addEffect(Effect.getEffect(27).setDuration(20 * 30));
                                 player.setHealth(player.getMaxHealth());
                                 player.getFoodData().setFoodLevel(player.getFoodData().getMaxLevel());
+                                player.getInventory().addItem(Item.get(ItemID.STONE_SWORD));
+                                player.getInventory().addItem(Item.get(ItemID.STONE_PICKAXE));
+                                player.getInventory().addItem(Item.get(ItemID.STONE_AXE));
                                 if (getKits().get(player) == null){
                                     getKits().put(player,Kits.values()[Main.RANDOM.nextInt(Kits.values().length - 1)]);
-                                    player.sendMessage("本局你未选择职业，将随机分配职业为：" + getKitName(getKits().get(player)));
+                                    player.sendMessage("本局你未选择职业，将随机分配职业为：§b" + getKitName(getKits().get(player)) + " §7- " + getKitDesc(getKits().get(player)));
                                 }else {
-                                    player.sendMessage("本局你的职业为：" + getKitName(getKits().get(player)));
+                                    player.sendMessage("本局你的职业为：§b" + getKitName(getKits().get(player)) + " §7- " + getKitDesc(getKits().get(player)));
                                 }
 
                                 player.sendMessage("游戏开始!");
+                                if (getKits().get(player) == Kits.SHOOTER){
+                                    player.getInventory().addItem(Item.get(ItemID.BOW));
+                                    player.getInventory().addItem(Item.get(ItemID.ARROW, 0, 5));
+                                }
                             }
                             distributePlayers(getActivePlayers(),level);
                             for (Player player : getActivePlayers()) {
@@ -156,6 +187,12 @@ public class GameRoom {
                             for (Item item : poll.getInventory().getContents().values()) {
                                 poll.getLevel().dropItem(poll.getLocation(),item);
                             }
+                            Player damager = lastDamager.get(poll);
+                            if (damager != null && kits.get(damager) == Kits.SOLDIER){
+                                for (Item item : poll.getInventory().getContents().values()) {
+                                    poll.getLevel().dropItem(poll.getLocation(),item.clone());
+                                }
+                            }
                             poll.getInventory().clearAll();
                             poll.setGamemode(3);
                             getActivePlayers().remove(poll);
@@ -164,6 +201,19 @@ public class GameRoom {
                             poll = deathQueue.poll();
                         }
                         setKitChoose(false);
+
+                        monkTimer ++;
+                        if (monkTimer >= 5){
+                            monkTimer = 0;
+                            for (Player player : getActivePlayers()) {
+                                Kits kit = kits.get(player);
+                                if (kit == Kits.MONK){
+                                    if (player.getHealth() < player.getMaxHealth() / 2){
+                                        player.getInventory().addItem(Item.get(ItemID.GOLDEN_APPLE));
+                                    }
+                                }
+                            }
+                        }
 
                         if (time == 60*5){
                             protect = false;
@@ -218,19 +268,7 @@ public class GameRoom {
                             lastLocation.put(player,player.getLocation());
                             Kits kit = kits.get(player);
                             if (kit != null){
-                                if (kit == Kits.MINER){
-                                    boolean hasDigSpeed = false;
-                                    for (Effect effect : player.getEffects().values()) {
-                                        if (effect.getId() == 3) {
-                                            hasDigSpeed = true;
-                                            break;
-                                        }
-                                    }
-                                    if (!hasDigSpeed) {
-                                        player.addEffect(Effect.getEffectByName("HASTE").setDuration(20*20).setAmplifier(1));
-                                    }
-                                }
-                                player.setNameTag(player.getName() + "\n 职业: " + getKitName(kit));
+                                player.setNameTag(player.getName() + "\n §b职业: " + getKitName(kit));
                             }
                             if (borderChecker.isOutsideBorder(player)){
                                 player.attack(1);
@@ -357,6 +395,7 @@ public class GameRoom {
             while (y > 0){
                 y --;
                 if (location.getLevel().getBlock((int) location.x,y, (int) location.z).isWater() || location.getLevel().getBlock((int) location.x,y, (int) location.z).isWaterSource()){
+                    radius += 100;
                     distributePlayers(players,level);
                     return;
                 }

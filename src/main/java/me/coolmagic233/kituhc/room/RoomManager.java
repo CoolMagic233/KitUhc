@@ -48,9 +48,9 @@ public class RoomManager implements Listener {
                 player.getInventory().clearAll();
                 player.getInventory().setItem(8,Item.get(ItemID.FEATHER).setCustomName("§a退出房间"));
                 room.getLevel().setRaining(false);
-                FormWindowSimple formWindowSimple = new FormWindowSimple("选择你的职业", "");
+                FormWindowSimple formWindowSimple = new FormWindowSimple("§l§6选择你的职业", "§7点击选择你想要使用的职业");
                 for (Kits kit : Kits.values()) {
-                    formWindowSimple.addButton(new ElementButton(room.getKitName(kit)));
+                    formWindowSimple.addButton(new ElementButton("§b" + room.getKitName(kit) + "\n§7" + room.getKitDesc(kit)));
                 }
                 player.showFormWindow(formWindowSimple,Main.FORM_ID_KIT_SELECT);
                 return;
@@ -140,7 +140,7 @@ public class RoomManager implements Listener {
                 if (e.getFormID() == Main.FORM_ID_KIT_SELECT){
                     if (e.getResponse() instanceof FormResponseSimple response){
                         room.getKits().put(player,Kits.values()[response.getClickedButtonId()]);
-                        player.sendMessage("你选择了职业: " + room.getKitName(room.getKits().get(player)));
+                        player.sendMessage("你选择了职业: §b" + room.getKitName(room.getKits().get(player)) + " §7- " + room.getKitDesc(room.getKits().get(player)));
                     }
                 }
             }
@@ -156,7 +156,14 @@ public class RoomManager implements Listener {
                 e.setCancelled();
                 return;
             }
-            if (e.getFinalDamage() >= e.getEntity().getHealth()){
+            if (e.getFinalDamage() + 1 >= e.getEntity().getHealth()){
+                    Kits kit = room.getKits().get(player);
+                    if (kit == Kits.TANK && new Random().nextBoolean()){
+                        e.setCancelled();
+                        player.setHealth(player.getMaxHealth());
+                        room.sendMessageAll(String.format("%s通过坦克之力复活！",e.getEntity().getName()));
+                        return;
+                    }
                    if (!room.getDeathQueue().contains(player)){
                        room.getDeathQueue().offer(player);
                    }
@@ -198,22 +205,12 @@ public class RoomManager implements Listener {
                     if (damager_kit != null){
                         if (damager_kit == Kits.SHOOTER){
                             if (e.getCause() == EntityDamageEvent.DamageCause.PROJECTILE){
-                                e.setDamage((float) (e.getFinalDamage() + e.getFinalDamage() * 0.2));
-                            }
-                        }
-                        if (damager_kit == Kits.SHOOTER){
-                            if (damager.getInventory().getItemInHand().isSword()){
-                                e.setDamage((float) (e.getFinalDamage() + e.getFinalDamage() * 0.2));
+                                damager.getInventory().addItem(Item.get(ItemID.ARROW));
                             }
                         }
                     }
                     if (e.getEntity() instanceof Player player){
-                        Kits kit = room.getKits().get(damager);
-                        if (kit != null){
-                            if (kit == Kits.TANK){
-                                e.setDamage((float) ((e.getFinalDamage() - e.getFinalDamage() * 0.2 < 0) ? 0 : e.getFinalDamage() - e.getFinalDamage() * 0.2));
-                            }
-                        }
+                        room.getLastDamager().put(player, damager);
                     }
                 }
             }
@@ -247,34 +244,28 @@ public class RoomManager implements Listener {
                         if (itemInHand.hasCompoundTag()){
                             if (itemInHand.getNamedTag().contains("level")){
                                 int level = itemInHand.getNamedTag().getInt("level");
-                                if (level == 1){
-                                    Item common = room.getRandomReward("common");
-                                    if (common == null){
-                                        return;
-                                    }
-                                    e.getPlayer().getLevel().dropItem(e.getBlock().getLocation().add(0,1,0),common);
-                                    e.getPlayer().getInventory().setItemInHand(e.getPlayer().getInventory().getItemInHand().increment(1));
+                                int count = itemInHand.getCount();
+                                String rarity = switch (level) {
+                                    case 1 -> "common";
+                                    case 2 -> "rare";
+                                    case 3 -> "epic";
+                                    default -> null;
+                                };
+                                if (rarity == null) return;
+                                Item first = room.getRandomReward(rarity);
+                                if (first == null) return;
+                                e.getPlayer().getInventory().setItemInHand(Item.get(0));
+                                cn.nukkit.level.Location dropLoc = e.getBlock().getLocation().add(0, 1, 0);
+                                cn.nukkit.level.Level dropLevel = e.getPlayer().getLevel();
+                                for (int i = 0; i < count; i++) {
+                                    int delay = 20 * i;
+                                    Main.getInstance().getServer().getScheduler().scheduleDelayedTask(Main.getInstance(), () -> {
+                                        Item reward = room.getRandomReward(rarity);
+                                        if (reward != null) {
+                                            dropLevel.dropItem(dropLoc, reward);
+                                        }
+                                    }, delay);
                                 }
-
-                                if (level == 2){
-                                    Item rare = room.getRandomReward("rare");
-                                    if (rare == null){
-                                        return;
-                                    }
-                                    e.getPlayer().getLevel().dropItem(e.getBlock().getLocation().add(0,1,0),rare);
-                                    e.getPlayer().getInventory().setItemInHand(e.getPlayer().getInventory().getItemInHand().increment(1));
-                                }
-
-                                if (level == 3){
-                                    Item epic = room.getRandomReward("epic");
-                                    if (epic == null){
-                                        return;
-                                    }
-                                    e.getPlayer().getLevel().dropItem(e.getBlock().getLocation().add(0,1,0),epic);
-                                    e.getPlayer().getInventory().setItemInHand(e.getPlayer().getInventory().getItemInHand().increment(1));
-                                }
-
-
                             }
                         }
                     }
@@ -301,36 +292,22 @@ public class RoomManager implements Listener {
                         e.getBlock().getId() == new BlockOreRedstoneGlowing().getId()) {
                     Kits kits = room.getKits().get(e.getPlayer());
                     if (kits != null){
-                        if (kits == Kits.MONK){
-                            e.getPlayer().getLevel().dropItem(e.getBlock().getLocation(),new ItemPotionSplash(new Random().nextInt(36)));
+                        if (kits == Kits.MINER){
+                            String rarity = null;
+                            if (e.getBlock().getId() == new BlockOreIron().getId() || e.getBlock().getId() == new BlockOreCoal().getId() || e.getBlock().getId() == new BlockOreCopper().getId()){
+                                rarity = "common";
+                            } else if (e.getBlock().getId() == new BlockOreLapis().getId() || e.getBlock().getId() == new BlockOreRedstoneGlowing().getId() || e.getBlock().getId() == new BlockOreQuartz().getId() || e.getBlock().getId() == new BlockOreRedstone().getId()){
+                                rarity = "rare";
+                            } else if (e.getBlock().getId() == new BlockOreDiamond().getId() || e.getBlock().getId() == new BlockOreGold().getId() || e.getBlock().getId() == new BlockOreEmerald().getId() || e.getBlock().getId() == new BlockOreGoldNether().getId()){
+                                rarity = "epic";
+                            }
+                            if (rarity != null){
+                                Item reward = room.getRandomReward(rarity);
+                                if (reward != null){
+                                    e.getBlock().getLevel().dropItem(e.getBlock().getLocation(), reward);
+                                }
+                            }
                         }
-                    }
-
-                    if (e.getBlock().getId() == new BlockOreIron().getId() || e.getBlock().getId() == new BlockOreCoal().getId() || e.getBlock().getId() == new BlockOreCopper().getId()){
-                        Item item = Item.fromString(new ItemTrialKey().getNamespaceId());
-                        CompoundTag tag = item.getOrCreateNamedTag();
-                        tag.putInt("level",1);
-                        item.setNamedTag(tag);
-                        item.setCustomName("§a一级资源钥匙");
-                        e.getBlock().getLevel().dropItem(e.getBlock().getLocation(),item);
-                    }
-
-                    if (e.getBlock().getId() == new BlockOreLapis().getId() || e.getBlock().getId() == new BlockOreRedstoneGlowing().getId()){
-                        Item item = Item.fromString(new ItemTrialKey().getNamespaceId());
-                        CompoundTag tag = item.getOrCreateNamedTag();
-                        tag.putInt("level",2);
-                        item.setNamedTag(tag);
-                        item.setCustomName("§b二级资源钥匙");
-                        e.getBlock().getLevel().dropItem(e.getBlock().getLocation(),item);
-                    }
-
-                    if (e.getBlock().getId() == new BlockOreDiamond().getId() || e.getBlock().getId() == new BlockOreGold().getId()){
-                        Item item = Item.fromString(new ItemTrialKey().getNamespaceId());
-                        CompoundTag tag = item.getOrCreateNamedTag();
-                        tag.putInt("level",3);
-                        item.setNamedTag(tag);
-                        item.setCustomName("§c三级资源钥匙");
-                        e.getBlock().getLevel().dropItem(e.getBlock().getLocation(),item);
                     }
 
                 }
