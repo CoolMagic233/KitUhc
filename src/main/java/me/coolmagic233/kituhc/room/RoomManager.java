@@ -19,9 +19,6 @@ import cn.nukkit.utils.TextFormat;
 import cn.nukkit.utils.Utils;
 import me.coolmagic233.kituhc.Kits;
 import me.coolmagic233.kituhc.Main;
-import me.iwareq.scoreboard.Scoreboard;
-import me.iwareq.scoreboard.packet.data.DisplaySlot;
-
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -70,10 +67,10 @@ public class RoomManager implements Listener {
                 player.getInventory().setContents(playerContents.get(player));
                 playerContents.remove(player);
                 player.removeAllEffects();
-                room.getScoreboard().hide(player);
+                room.hideScoreboard(player);
                 room.getActivePlayers().remove(player);
                 room.getDeathPlayers().remove(player);
-
+                Main.executeCommands("exit-room-commands", java.util.Map.of("%player%", player.getName()), player);
                 return;
             }
         }
@@ -92,7 +89,6 @@ public class RoomManager implements Listener {
                 gameRoom.setGameStatus(GameStatus.WAIT);
             }
             gameRoom.setTime(WAIT_TIME);
-            gameRoom.setScoreboard(new Scoreboard("KitUHC", DisplaySlot.SIDEBAR, 0));
             gameRoom.startGameLoop();
                 Thread.sleep(2000);
             } catch (InterruptedException e) {

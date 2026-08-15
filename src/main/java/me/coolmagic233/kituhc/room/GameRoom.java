@@ -7,15 +7,19 @@ import cn.nukkit.block.BlockWood;
 import cn.nukkit.item.Item;
 import cn.nukkit.item.ItemID;
 import cn.nukkit.level.DimensionEnum;
+import cn.nukkit.level.GameRule;
 import cn.nukkit.level.Level;
 
 import cn.nukkit.level.Location;
+import cn.nukkit.level.biome.Biome;
+import cn.nukkit.level.biome.impl.ocean.OceanBiome;
 import cn.nukkit.math.Vector2;
 import cn.nukkit.potion.Effect;
 import lombok.Data;
+import cn.nukkit.network.protocol.types.DisplaySlot;
+import cn.nukkit.scoreboard.scoreboard.Scoreboard;
 import me.coolmagic233.kituhc.Kits;
 import me.coolmagic233.kituhc.Main;
-import me.iwareq.scoreboard.Scoreboard;
 
 import java.io.File;
 import java.util.*;
@@ -29,7 +33,7 @@ public class GameRoom {
     private ArrayBlockingQueue<Player> deathQueue = new ArrayBlockingQueue<>(10);
     private ArrayBlockingQueue<Level> resetQueue = new ArrayBlockingQueue<>(10);
     private Level level;
-    private Scoreboard scoreboard;
+    private Map<Player, Scoreboard> scoreboards = new HashMap<>();
     private BorderChecker borderChecker;
     private Map<Player,Location> lastLocation = new HashMap<>();
     private Map<Player,Kits> kits = new HashMap<>();
@@ -39,6 +43,7 @@ public class GameRoom {
     private boolean protect = true;
     private boolean gameLoop = true;
     private int time;
+    private int borderPauseTime = 20 * 3;
     private int rewardsRefresh;
     private int monkTimer;
     private String levelName;
@@ -56,7 +61,16 @@ public class GameRoom {
         getActivePlayers().forEach(player -> player.sendActionBar(text));
     }
 
+    public Scoreboard getScoreboard(Player player){
+        return scoreboards.computeIfAbsent(player, p -> new Scoreboard("KitUHC-" + p.getName(), "KitUHC"));
+    }
 
+    public void hideScoreboard(Player player){
+        Scoreboard scoreboard = scoreboards.remove(player);
+        if (scoreboard != null){
+            scoreboard.removeViewer(player, DisplaySlot.SIDEBAR);
+        }
+    }
 
     public boolean checkPlayersCount(){
         return getActivePlayers().size() >= 2;
@@ -117,14 +131,19 @@ public class GameRoom {
                 try {
 
 
-                    scoreboard.refresh();
-                    scoreboard.setHandler(pl -> {
-                        scoreboard.addLine("边界: " + (int) borderChecker.get());
-                        scoreboard.addLine("存活玩家: "+getActivePlayers().size());
-                    });
-
                     for (Player player : getAllPlayers()) {
-                        scoreboard.show(player);
+                        Scoreboard scoreboard = getScoreboard(player);
+                        List<String> lines = new ArrayList<>();
+                        lines.add("§7房间: " + getLevelName());
+                        if (gameStatus == GameStatus.GAME){
+                            lines.add("边界: " + (int) borderChecker.get());
+                            lines.add("职业: " + getKitName(kits.get(player)));
+                            lines.add("存活玩家: "+getActivePlayers().size());
+                        }else {
+                            lines.add("等待玩家中...");
+                        }
+                        scoreboard.setLines(lines);
+                        scoreboard.addViewer(player, DisplaySlot.SIDEBAR);
                     }
 
                     if (gameStatus == GameStatus.WAIT){
@@ -167,7 +186,7 @@ public class GameRoom {
                                 player.sendMessage("游戏开始!");
                                 if (getKits().get(player) == Kits.SHOOTER){
                                     player.getInventory().addItem(Item.get(ItemID.BOW));
-                                    player.getInventory().addItem(Item.get(ItemID.ARROW, 0, 5));
+                                    player.getInventory().addItem(Item.get(ItemID.ARROW, 0, 32));
                                 }
                             }
                             distributePlayers(getActivePlayers(),level);
@@ -242,13 +261,16 @@ public class GameRoom {
                         }
 
 
-                        if (time <= 60 * 25){
+                        if (borderChecker.get() > 20){
                             borderChecker.shrink(2);
+                        }else {
+                            if (borderPauseTime > 0){
+                                borderPauseTime --;
+                            }else {
+                                borderChecker.setBorder(0,0,0,0);
+                            }
                         }
 
-                        for (Player player : getAllPlayers()) {
-                            borderChecker.showBorder(player);
-                        }
 
                         for (Player player : getActivePlayers()) {
                             for (Player activePlayer : getActivePlayers()) {
@@ -271,6 +293,7 @@ public class GameRoom {
                                 player.setNameTag(player.getName() + "\n §b职业: " + getKitName(kit));
                             }
                             if (borderChecker.isOutsideBorder(player)){
+                                player.sendActionBar("§c你正在边界外，请尽快返回安全区域！");
                                 player.attack(1);
                             }
                         }
@@ -300,6 +323,11 @@ public class GameRoom {
                         time --;
                         if (time < 0) {
 
+                            String winnerName = "";
+                            if (!getActivePlayers().isEmpty()){
+                                winnerName = getActivePlayers().getFirst().getName();
+                            }
+
                             for (Player player : getAllPlayers()) {
                                 if (player.getLevel().getName().equals(levelName)){
                                     player.setGamemode(Main.getInstance().getServer().getDefaultGamemode());
@@ -307,8 +335,9 @@ public class GameRoom {
                                     player.setNameTag(player.getName());
                                     RoomManager.playerContents.remove(player);
                                     player.removeAllEffects();
-                                    getScoreboard().hide(player);
+                                    hideScoreboard(player);
                                     player.teleport(Main.getInstance().getServer().getDefaultLevel().getSpawnLocation());
+                                    Main.executeCommands("game-end-commands", java.util.Map.of("%player%", player.getName(), "%winner%", winnerName), player);
                                 }
                             }
 
@@ -354,6 +383,7 @@ public class GameRoom {
                             throw new RuntimeException();
                         }
                         setLevel(newLevel);
+                        getLevel().gameRules.setGameRule(GameRule.SHOW_COORDINATES,true);
                         setKitChoose(true);
                         setTime(RoomManager.WAIT_TIME);
                         setBorderChecker(new BorderChecker(-5000,5000,-5000,5000));
@@ -376,34 +406,96 @@ public class GameRoom {
         if (players.isEmpty()) return;
 
         int playerCount = players.size();
-        double angleIncrement = 2 * Math.PI / playerCount; // 角度增量
-        double radius = 500; // 基础半径
+        double minDistance = Math.max(150, Math.min(600, 1800 / Math.sqrt(playerCount)));
+        double radius = Math.max(700, minDistance * Math.sqrt(playerCount) * 1.4);
+        List<Vector2> points = new ArrayList<>();
+
+        while (points.size() < playerCount && minDistance >= 80) {
+            points = generatePoissonDiskPoints(level, playerCount, minDistance, radius);
+            minDistance *= 0.85;
+            radius *= 1.1;
+        }
+
+        while (points.size() < playerCount) {
+            Vector2 point = findRandomSpawnPoint(level, points, 0, radius);
+            if (point == null) break;
+            points.add(point);
+            radius *= 1.1;
+        }
+
+        if (points.isEmpty()) return;
+        Collections.shuffle(points, Main.RANDOM);
 
         for (int i = 0; i < playerCount; i++) {
-            Player player = players.get(i);
+            Vector2 point = points.get(i % points.size());
+            players.get(i).teleport(new Location(point.x, 150, point.y, level));
+        }
+    }
 
-            // 计算圆形分布坐标
-            double angle = i * angleIncrement;
-            double x = radius * Math.cos(angle);
-            double z = radius * Math.sin(angle);
+    private List<Vector2> generatePoissonDiskPoints(Level level, int count, double minDistance, double radius) {
+        List<Vector2> points = new ArrayList<>();
+        List<Vector2> activePoints = new ArrayList<>();
+        Vector2 firstPoint = findRandomSpawnPoint(level, points, minDistance, radius);
+        if (firstPoint == null) return points;
 
-            // 创建位置对象 (Y坐标固定为150)
-            Location location = new Location(x, 150, z, level);
+        points.add(firstPoint);
+        activePoints.add(firstPoint);
 
-            int y = location.getLevel().getMaxBlockY();
+        while (!activePoints.isEmpty() && points.size() < count) {
+            int activeIndex = Main.RANDOM.nextInt(activePoints.size());
+            Vector2 activePoint = activePoints.get(activeIndex);
+            boolean found = false;
 
-            while (y > 0){
-                y --;
-                if (location.getLevel().getBlock((int) location.x,y, (int) location.z).isWater() || location.getLevel().getBlock((int) location.x,y, (int) location.z).isWaterSource()){
-                    radius += 100;
-                    distributePlayers(players,level);
-                    return;
+            for (int i = 0; i < 30; i++) {
+                double angle = Main.RANDOM.nextDouble() * Math.PI * 2;
+                double distance = minDistance * (1 + Main.RANDOM.nextDouble());
+                double x = activePoint.x + Math.cos(angle) * distance;
+                double z = activePoint.y + Math.sin(angle) * distance;
+
+                if (isValidSpawnPoint(level, x, z, points, minDistance, radius)) {
+                    Vector2 point = new Vector2(x, z);
+                    points.add(point);
+                    activePoints.add(point);
+                    found = true;
+                    break;
                 }
             }
-            // 传送玩家
-            player.teleport(location);
 
+            if (!found) {
+                activePoints.remove(activeIndex);
+            }
         }
+
+        return points;
+    }
+
+    private Vector2 findRandomSpawnPoint(Level level, List<Vector2> points, double minDistance, double radius) {
+        for (int i = 0; i < 1000; i++) {
+            double angle = Main.RANDOM.nextDouble() * Math.PI * 2;
+            double distance = Math.sqrt(Main.RANDOM.nextDouble()) * radius;
+            double x = Math.cos(angle) * distance;
+            double z = Math.sin(angle) * distance;
+
+            if (isValidSpawnPoint(level, x, z, points, minDistance, radius)) {
+                return new Vector2(x, z);
+            }
+        }
+
+        return null;
+    }
+
+    private boolean isValidSpawnPoint(Level level, double x, double z, List<Vector2> points, double minDistance, double radius) {
+        if (x * x + z * z > radius * radius) return false;
+        if (Biome.getBiome(level.getBiomeId((int) x, (int) z)) instanceof OceanBiome) return false;
+
+        double minDistanceSquared = minDistance * minDistance;
+        for (Vector2 point : points) {
+            double dx = point.x - x;
+            double dz = point.y - z;
+            if (dx * dx + dz * dz < minDistanceSquared) return false;
+        }
+
+        return true;
     }
 
     public Item getRandomReward(String key){

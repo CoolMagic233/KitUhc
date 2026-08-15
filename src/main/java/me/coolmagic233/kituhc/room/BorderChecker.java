@@ -4,6 +4,7 @@ import cn.nukkit.Player;
 import cn.nukkit.level.Location;
 import cn.nukkit.level.ParticleEffect;
 import cn.nukkit.level.Position;
+import cn.nukkit.level.particle.DustParticle;
 import cn.nukkit.level.particle.Particle;
 import cn.nukkit.math.Vector2;
 import cn.nukkit.math.Vector3;
@@ -56,7 +57,11 @@ public class BorderChecker {
                 for(int z = (int) (player.getZ() - 7); z < player.getZ() + 7; z ++) {
                     for (int y = (int) (player.getY() - 3); y < player.getY() + 3; y++) {
                         Position position = new Position(maxX, y, z, player.getLevel());
-                        position.getLevel().addParticleEffect(position, ParticleEffect.REDSTONE_ORE_DUST);
+                        if (position.x > maxX || position.x < minX){
+                            position.getLevel().addParticle(new DustParticle(position,255,0,0));
+                        }else {
+                            position.getLevel().addParticle(new DustParticle(position,0,255,0));
+                        }
                     }
                 }
             }
@@ -64,7 +69,11 @@ public class BorderChecker {
                 for(int z = (int) (player.getZ() - 7); z < player.getZ() + 7; z ++) {
                     for (int y = (int) (player.getY() - 3); y < player.getY() + 3; y++) {
                         Position position = new Position(minX, y, z, player.getLevel());
-                        position.getLevel().addParticleEffect(position, ParticleEffect.REDSTONE_ORE_DUST);
+                        if (position.x > maxX || position.x < minX){
+                            position.getLevel().addParticle(new DustParticle(position,255,0,0));
+                        }else {
+                            position.getLevel().addParticle(new DustParticle(position,0,255,0));
+                        }
                     }
                 }
             }
@@ -72,7 +81,11 @@ public class BorderChecker {
                 for(int x = (int) (player.getX() - 7); x < player.getX() + 7; x ++) {
                     for (int y = (int) (player.getY() - 3); y < player.getY() + 3; y++) {
                         Position position = new Position(x, y, maxZ, player.getLevel());
-                        position.getLevel().addParticleEffect(position, ParticleEffect.REDSTONE_ORE_DUST);
+                        if (position.z > maxZ || position.x < minZ){
+                            position.getLevel().addParticle(new DustParticle(position,255,0,0));
+                        }else {
+                            position.getLevel().addParticle(new DustParticle(position,0,255,0));
+                        }
                     }
                 }
             }
@@ -80,7 +93,11 @@ public class BorderChecker {
                 for(int x = (int) (player.getX() - 7); x < player.getX() + 7; x ++) {
                     for (int y = (int) (player.getY() - 3); y < player.getY() + 3; y++) {
                         Position position = new Position(x, y, minZ, player.getLevel());
-                        position.getLevel().addParticleEffect(position, ParticleEffect.REDSTONE_ORE_DUST);
+                        if (position.z > maxZ || position.x < minZ){
+                            position.getLevel().addParticle(new DustParticle(position,255,0,0));
+                        }else {
+                            position.getLevel().addParticle(new DustParticle(position,0,255,0));
+                        }
                     }
                 }
             }
